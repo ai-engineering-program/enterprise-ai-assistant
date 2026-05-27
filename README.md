@@ -23,14 +23,18 @@ Production AI assistant system built incrementally across 11 courses of the AI E
 ```
 app/
 ├── main.py          ← FastAPI entry point (Course 1)
-├── api/             ← API layer (Course 1)
-├── routing/         ← AI routing layer (Course 5)
-├── rag/             ← RAG layer (Course 2)
-├── ingestion/       ← Ingestion pipeline (Course 3)
-├── context/         ← Context engine (Course 4)
-├── agents/          ← Agents & workflows (Course 7)
-├── evaluation/      ← Evaluation layer (Course 8)
-└── reliability/     ← Reliability & observability (Course 9)
+├── api/             ← API layer — request handling (Course 1)
+├── routing/         ← AI routing layer — model/cost routing (Course 5)
+├── rag/             ← RAG layer — retrieval-augmented generation (Course 2)
+├── ingestion/       ← Ingestion pipeline — document processing (Course 3)
+├── context/         ← Context engine — compression & memory (Course 4)
+├── agents/          ← Agents & workflows — LangGraph (Course 7)
+├── evaluation/      ← Evaluation layer — RAGAS & regression (Course 8)
+├── reliability/     ← Reliability — circuit breaker, retries (Course 9)
+├── cache/           ← Semantic cache — embedding-based hit rate (Course 5)
+├── observability/   ← Metrics, tracing, cost tracking (Course 8)
+├── llm/             ← LLM provider clients — OpenAI, Anthropic (Course 1)
+└── core/            ← Shared utilities, config, base classes (Course 1)
 tests/
 requirements.txt
 ```
