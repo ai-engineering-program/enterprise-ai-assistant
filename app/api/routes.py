@@ -1,19 +1,14 @@
-"""API routes — async implementation, Course 1 M3 L2.
+"""API routes — async implementation, Course 1 M3 L2 + background ingestion M4 L2.
 
-Refactored from sync def query() (M2 L1) to async def query().
-Key changes:
-  - def query() → async def query()
-  - httpx.Client → httpx.AsyncClient
-  - rag_service.retrieve() → asyncio.gather(primary, metadata) with timeout
-  - LLM call wrapped in asyncio.wait_for()
-
-Run the load test from M3 L1 again (concurrency=20, 50) to see the improvement.
+M3 L2: refactored POST /query from sync to async.
+M4 L2: added POST /ingest (202 Accepted + BackgroundTasks) and GET /ingest/{task_id}.
 """
 import asyncio
 import time
+import uuid
 
 import httpx
-from fastapi import APIRouter
+from fastapi import APIRouter, BackgroundTasks
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 
@@ -118,3 +113,60 @@ async def query(request: QueryRequest) -> JSONResponse:
             status_code=500,
             content={"error": "Internal server error", "status": "error", "retryable": False},
         )
+
+
+# ---------------------------------------------------------------------------
+# Background ingestion — Course 1 M4 L2
+# ---------------------------------------------------------------------------
+
+# In-memory task store. Does NOT survive restarts — use Redis + TTL in production.
+_task_store: dict[str, dict] = {}
+
+
+class IngestRequest(BaseModel):
+    doc_id: str
+    content: str
+
+
+async def _ingest_document(task_id: str, doc_id: str, content: str) -> None:
+    """Background worker: chunk → embed (stub) → store. Updates task status in place.
+
+    TODO (M4 L2): replace stub embedding with a real call to app/rag/retriever.py
+    and persist chunks to a vector store.
+    """
+    _task_store[task_id]["status"] = "processing"
+    try:
+        chunks = [content[i:i + 100] for i in range(0, len(content), 100)]
+        for _ in chunks:
+            await asyncio.sleep(0.05)  # simulate embedding API latency per chunk
+        _task_store[task_id] = {
+            "status": "done",
+            "result": {"chunks": len(chunks), "doc_id": doc_id},
+        }
+    except Exception as exc:
+        _task_store[task_id] = {"status": "failed", "error": str(exc)}
+
+
+@router.post("/ingest", status_code=202)
+async def ingest(request: IngestRequest, background_tasks: BackgroundTasks) -> dict:
+    """Accept a document for background ingestion.
+
+    Returns HTTP 202 immediately with a task_id.
+    Poll GET /ingest/{task_id} to track progress.
+
+    TODO (M4 L2): wire _ingest_document to a real RAG pipeline
+    instead of the stub embedding simulation.
+    """
+    task_id = str(uuid.uuid4())
+    _task_store[task_id] = {"status": "pending"}
+    background_tasks.add_task(_ingest_document, task_id, request.doc_id, request.content)
+    return {"task_id": task_id, "status": "pending"}
+
+
+@router.get("/ingest/{task_id}")
+async def ingest_status(task_id: str) -> dict:
+    """Return current status of an ingestion task.
+
+    Status values: pending | processing | done | failed
+    """
+    return _task_store.get(task_id, {"status": "not_found"})
