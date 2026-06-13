@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 
-__all__ = ["FixedSizeChunker", "RecursiveChunker"]
+__all__ = ["FixedSizeChunker", "RecursiveChunker", "SemanticChunker"]
 
 
 class FixedSizeChunker:
@@ -82,4 +82,48 @@ class RecursiveChunker:
             Список непустых строк-фрагментов.
         """
         # TODO: реализовать рекурсивную логику
+        ...
+
+
+class SemanticChunker:
+    """Семантическая разбивка текста по embedding-расстоянию между предложениями.
+
+    Алгоритм:
+    1. Разбить текст на предложения по знакам препинания ('. ', '! ', '? ').
+    2. Закодировать каждое предложение через SentenceTransformer.
+    3. Вычислить косинусное расстояние между соседними эмбеддингами.
+    4. Отметить точки разрыва там, где расстояние превышает threshold.
+    5. Объединить предложения между точками разрыва в чанки.
+
+    Зависимость: sentence-transformers (pip install sentence-transformers)
+    """
+
+    def __init__(self, model_name: str = "all-MiniLM-L6-v2", threshold: float = 0.4) -> None:
+        # TODO: загрузить SentenceTransformer(model_name) и сохранить как self.model
+        #       from sentence_transformers import SentenceTransformer
+        # TODO: сохранить threshold как self.threshold
+        # TODO: проверить, что threshold находится в диапазоне (0, 1)
+        #       Если нет — поднять ValueError:
+        #       f"threshold должен быть в диапазоне (0, 1), получено: {threshold}"
+        ...
+
+    def split(self, text: str) -> list[str]:
+        """Разбить текст на семантически связные фрагменты.
+
+        Returns:
+            Список непустых строк-фрагментов.
+        """
+        # TODO: Шаг 1 — разбить text на предложения по '. ', '! ', '? '
+        #        (можно использовать re.split или последовательные str.split)
+        # TODO: Шаг 2 — отфильтровать предложения, у которых sentence.strip() == ""
+        # TODO: Шаг 3 — если предложений 0 — вернуть []
+        #                если предложение одно — вернуть [text.strip()]
+        # TODO: Шаг 4 — закодировать все предложения: embeddings = self.model.encode(sentences)
+        # TODO: Шаг 5 — вычислить косинусное расстояние между соседними эмбеддингами
+        #        cosine_distance(a, b) = 1 - dot(a, b) / (norm(a) * norm(b))
+        #        Используйте numpy — не нужен sklearn
+        # TODO: Шаг 6 — отметить точки разрыва: индексы i, где distances[i] > self.threshold
+        # TODO: Шаг 7 — сгруппировать предложения между точками разрыва в чанки
+        #        (объединить через " ".join или "". join в зависимости от исходного разделения)
+        # TODO: Шаг 8 — вернуть список непустых строк (chunk.strip() != "")
         ...
