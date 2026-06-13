@@ -1,6 +1,8 @@
 import pytest
+import numpy as np
+from unittest.mock import MagicMock, patch
 
-from app.rag.chunker import FixedSizeChunker, RecursiveChunker
+from app.rag.chunker import FixedSizeChunker, RecursiveChunker, SemanticChunker
 
 
 # ---------------------------------------------------------------------------
@@ -240,6 +242,216 @@ class TestChunkerComparison:
 
 
 # ---------------------------------------------------------------------------
+# SemanticChunker — unit-тесты (эмбеддинги замоканы, модель не загружается)
+# ---------------------------------------------------------------------------
+
+def _make_mock_model(embeddings: np.ndarray) -> MagicMock:
+    """Вернуть мок SentenceTransformer, чей .encode() возвращает готовые эмбеддинги."""
+    mock = MagicMock()
+    mock.encode.return_value = embeddings
+    return mock
+
+
+@pytest.mark.unit
+class TestSemanticChunker:
+    """Тесты SemanticChunker без загрузки реальной модели.
+
+    Все тесты патчат sentence_transformers.SentenceTransformer через
+    patch("app.rag.chunker.SentenceTransformer"), подставляя мок-объект,
+    чей .encode() возвращает заранее подготовленные numpy-массивы.
+
+    Геометрия фейковых эмбеддингов:
+      Кластер A: вектор близкий к [1, 0, ...] — cosine_distance между
+                 предложениями кластера ≈ 0.0 (очень похожи).
+      Кластер B: вектор близкий к [0, 1, ...] — cosine_distance между
+                 предложениями кластера ≈ 0.0.
+      Расстояние A→B ≈ 1.0 — максимальный разрыв, чёткая граница.
+    """
+
+    # ------------------------------------------------------------------
+    # Вспомогательные фейковые эмбеддинги
+    # ------------------------------------------------------------------
+
+    # 2-мерные единичные векторы: A = [1, 0], B = [0, 1]
+    # cosine_distance(A, A) = 0.0, cosine_distance(A, B) = 1.0
+    _EMB_A = np.array([1.0, 0.0], dtype=np.float32)
+    _EMB_B = np.array([0.0, 1.0], dtype=np.float32)
+
+    def _patch_st(self, embeddings: np.ndarray):
+        """Контекстный менеджер: патчит SentenceTransformer в chunker-модуле."""
+        mock_model = _make_mock_model(embeddings)
+        return patch("app.rag.chunker.SentenceTransformer", return_value=mock_model)
+
+    # ------------------------------------------------------------------
+    # Граничные случаи — пустой и одиночный ввод
+    # ------------------------------------------------------------------
+
+    def test_empty_text_returns_empty_list(self):
+        """Пустая строка → []."""
+        emb = np.empty((0, 2), dtype=np.float32)
+        with self._patch_st(emb):
+            sc = SemanticChunker(threshold=0.5)
+            result = sc.split("")
+        assert result == []
+
+    def test_whitespace_only_returns_empty_list(self):
+        """Строка только из пробелов и переносов строк → []."""
+        emb = np.empty((0, 2), dtype=np.float32)
+        with self._patch_st(emb):
+            sc = SemanticChunker(threshold=0.5)
+            result = sc.split("   \n\n   \t  ")
+        assert result == []
+
+    def test_single_sentence_returns_one_chunk(self):
+        """Одно предложение без знаков препинания → список из одного элемента."""
+        single_emb = np.array([[1.0, 0.0]], dtype=np.float32)
+        with self._patch_st(single_emb):
+            sc = SemanticChunker(threshold=0.5)
+            result = sc.split("Одно единственное предложение")
+        assert len(result) == 1
+        assert result[0].strip() != ""
+
+    # ------------------------------------------------------------------
+    # Валидация параметров
+    # ------------------------------------------------------------------
+
+    def test_invalid_threshold_zero_raises_value_error(self):
+        """threshold=0 находится на границе допустимого диапазона → ValueError."""
+        with self._patch_st(np.empty((0, 2))):
+            with pytest.raises(ValueError):
+                SemanticChunker(threshold=0.0)
+
+    def test_invalid_threshold_one_raises_value_error(self):
+        """threshold=1 находится на границе допустимого диапазона → ValueError."""
+        with self._patch_st(np.empty((0, 2))):
+            with pytest.raises(ValueError):
+                SemanticChunker(threshold=1.0)
+
+    def test_invalid_threshold_negative_raises_value_error(self):
+        """threshold < 0 → ValueError."""
+        with self._patch_st(np.empty((0, 2))):
+            with pytest.raises(ValueError):
+                SemanticChunker(threshold=-0.1)
+
+    def test_invalid_threshold_greater_than_one_raises_value_error(self):
+        """threshold > 1 → ValueError."""
+        with self._patch_st(np.empty((0, 2))):
+            with pytest.raises(ValueError):
+                SemanticChunker(threshold=1.5)
+
+    # ------------------------------------------------------------------
+    # Логика объединения и разрыва
+    # ------------------------------------------------------------------
+
+    def test_high_threshold_merges_all_sentences(self):
+        """При threshold близком к 1 все предложения попадают в один чанк.
+
+        Три предложения из кластера A: расстояния между ними ≈ 0.0.
+        Порог = 0.99 — ни одно расстояние не превысит порог → один чанк.
+        """
+        # 3 предложения, все близко к вектору A
+        emb = np.array([
+            self._EMB_A,
+            self._EMB_A + np.array([0.01, 0.0]),   # почти A
+            self._EMB_A + np.array([0.02, 0.0]),   # почти A
+        ], dtype=np.float32)
+
+        text = "Первое предложение. Второе предложение. Третье предложение."
+        with self._patch_st(emb):
+            sc = SemanticChunker(threshold=0.99)
+            result = sc.split(text)
+
+        assert len(result) == 1, (
+            f"При высоком пороге ожидался 1 чанк, получено {len(result)}: {result}"
+        )
+
+    def test_low_threshold_splits_every_sentence(self):
+        """При очень низком threshold каждое предложение — отдельный чанк.
+
+        Используем три предложения с попарно ортогональными эмбеддингами
+        (косинусное расстояние = 1.0 между соседями).
+        Порог = 0.01 — все расстояния превышают порог → каждое предложение отдельно.
+        """
+        # A→B расстояние ≈ 1.0, B→C расстояние ≈ 1.0
+        _EMB_C = np.array([0.0, 0.0, 1.0], dtype=np.float32)
+        _EMB_A3 = np.array([1.0, 0.0, 0.0], dtype=np.float32)
+        _EMB_B3 = np.array([0.0, 1.0, 0.0], dtype=np.float32)
+
+        emb = np.array([_EMB_A3, _EMB_B3, _EMB_C], dtype=np.float32)
+
+        text = "Первое предложение. Второе предложение. Третье предложение."
+        with self._patch_st(emb):
+            sc = SemanticChunker(threshold=0.01)
+            result = sc.split(text)
+
+        assert len(result) == 3, (
+            f"При низком пороге ожидалось 3 чанка, получено {len(result)}: {result}"
+        )
+
+    def test_breakpoint_at_topic_shift(self):
+        """Чанкер обнаруживает смысловой разрыв между двумя тематическими блоками.
+
+        Текст: 3 предложения из «кластера A» (микросервисы), затем
+               3 предложения из «кластера B» (Kafka).
+        Фейковые эмбеддинги: A=[1,0], B=[0,1].
+        Cosine distance A→A ≈ 0, A→B ≈ 1.0, B→B ≈ 0.
+        При threshold=0.5 разрыв произойдёт ровно на границе кластеров.
+        Ожидаем 2 чанка.
+        """
+        # 6 предложений: 3 из кластера A, 3 из кластера B
+        emb = np.array([
+            self._EMB_A,
+            self._EMB_A,
+            self._EMB_A,
+            self._EMB_B,
+            self._EMB_B,
+            self._EMB_B,
+        ], dtype=np.float32)
+
+        text = (
+            "Микросервисы независимы друг от друга. "
+            "Каждый сервис развёртывается отдельно. "
+            "Сервисы общаются через API. "
+            "Kafka хранит сообщения в топиках. "
+            "Партиции обеспечивают параллелизм. "
+            "Репликация защищает от потери данных."
+        )
+        with self._patch_st(emb):
+            sc = SemanticChunker(threshold=0.5)
+            result = sc.split(text)
+
+        assert len(result) == 2, (
+            f"Ожидалось 2 чанка (микросервисы + Kafka), получено {len(result)}: {result}"
+        )
+        # Первый чанк должен содержать контент из кластера A
+        assert any(
+            kw in result[0]
+            for kw in ("Микросервис", "сервис", "API")
+        ), f"Первый чанк не содержит ожидаемых слов: {result[0]!r}"
+        # Второй чанк должен содержать контент из кластера B
+        assert any(
+            kw in result[1]
+            for kw in ("Kafka", "топик", "Партиц", "Реплик")
+        ), f"Второй чанк не содержит ожидаемых слов: {result[1]!r}"
+
+    def test_no_empty_chunks_returned(self):
+        """split() никогда не возвращает пустые строки или строки из пробелов."""
+        emb = np.array([
+            self._EMB_A,
+            self._EMB_B,
+            self._EMB_A,
+        ], dtype=np.float32)
+
+        text = "Первое предложение. Второе предложение. Третье предложение."
+        with self._patch_st(emb):
+            sc = SemanticChunker(threshold=0.5)
+            result = sc.split(text)
+
+        for chunk in result:
+            assert chunk.strip() != "", f"Обнаружен пустой чанк: {chunk!r}"
+
+
+# ---------------------------------------------------------------------------
 # Интеграционные тесты (требуют только локальной среды, без сервисов)
 # ---------------------------------------------------------------------------
 
@@ -253,3 +465,14 @@ class TestChunkerIntegration:
         Требует: pip install langchain-text-splitters
         """
         pytest.skip("Требует langchain-text-splitters — запустите вручную")
+
+    def test_semantic_chunker_with_real_model(self):
+        """
+        Проверить SemanticChunker с реальной моделью all-MiniLM-L6-v2.
+        Требует: pip install sentence-transformers (~80 МБ при первой загрузке)
+        """
+        pytest.skip(
+            "Требует sentence-transformers и загрузки модели — запустите вручную:\n"
+            "  pytest tests/test_chunker.py::TestChunkerIntegration"
+            "::test_semantic_chunker_with_real_model -v -m integration -s"
+        )
