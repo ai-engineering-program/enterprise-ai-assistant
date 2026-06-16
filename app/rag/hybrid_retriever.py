@@ -1,10 +1,13 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Optional
+from typing import TYPE_CHECKING, Optional
 
 from app.rag.dense_retriever import DenseRetriever
 from app.rag.sparse_retriever import BM25Retriever
+
+if TYPE_CHECKING:
+    from app.rag.reranker import Reranker
 
 
 __all__ = ["HybridRetriever", "HybridResult", "reciprocal_rank_fusion", "weighted_hybrid_retrieve"]
@@ -123,8 +126,10 @@ class HybridRetriever:
         sparse: BM25Retriever,
         rrf_k: int = 60,
         candidate_k: int = 20,
+        reranker: Optional["Reranker"] = None,
     ) -> None:
         # TODO: сохранить dense, sparse, rrf_k, candidate_k как атрибуты экземпляра
+        # TODO (урок 4.4): сохранить reranker как self.reranker
         ...
 
     def retrieve(
@@ -149,7 +154,9 @@ class HybridRetriever:
         1. Вызвать self.dense.retrieve(query, top_k=self.candidate_k).
         2. Вызвать self.sparse.retrieve(query, top_k=self.candidate_k).
         3. Вызвать reciprocal_rank_fusion(..., k=self.rrf_k).
-        4. Вернуть первые top_k элементов результата.
+        4. (урок 4.4) Если self.reranker is not None:
+              вернуть self.reranker.rerank(query, merged, top_k=top_k).
+        5. Иначе вернуть первые top_k элементов merged.
         """
         ...
 
