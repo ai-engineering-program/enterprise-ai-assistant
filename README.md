@@ -1,48 +1,48 @@
 # Enterprise AI Assistant
 
-Production AI assistant system built incrementally across 11 courses of the AI Engineering for Production program.
+Система AI-ассистента, будет построена постепенно в течение 11 курсов программы AI Engineering for Production.
 
-## Course progression
+## Прогресс обучения
 
-| Course | What gets added | Git tag |
-|--------|-----------------|---------|
-| 1 — AI System Architecture | Skeleton FastAPI app | `v1.0-skeleton` |
-| 2 — RAG Systems | RAG layer (`app/rag/`) | `v2.0-rag` |
-| 3 — Data Ingestion | Ingestion pipeline (`app/ingestion/`) | `v3.0-ingestion` |
-| 4 — Context Engineering | Context engine (`app/context/`) | `v4.0-context` |
-| 5 — AI Routing | Routing layer (`app/routing/`) | `v5.0-routing` |
-| 6 — Structured Output + Economics | Structured generation | `v6.0-structured` |
-| 7 — Agents & Workflows | Agents layer (`app/agents/`) | `v7.0-agents` |
-| 8 — Evaluation + LLMOps | Evaluation layer (`app/evaluation/`) | `v8.0-eval` |
-| 9 — Reliability + Inference | Reliability layer (`app/reliability/`) | `v9.0-reliability` |
-| 10 — Deployment & Scaling | Scaling configuration | `v10.0-scaling` |
-| 11 — Final Project | Full production system | `v11.0-production` |
+| Курс | Что добавляется | Git тег |
+|------|-----------------|---------|
+| [1 — Архитектура ИИ-систем](https://stepik.org/a/288745) | Скелет приложения FastAPI | `c01-*` |
+| 2 — Системы RAG | Слой RAG (`app/rag/`) | `c02-*` |
+| 3 — Поглощение данных | Конвейер поглощения (`app/ingestion/`) | `c03-*` |
+| 4 — Инженерия контекста | Движок контекста (`app/context/`) | `c04-*` |
+| 5 — AI маршрутизация | Слой маршрутизации (`app/routing/`) | `c05-*` |
+| 6 — Структурированный вывод + Экономика | Структурированное генерирование | `c06-*` |
+| 7 — Агенты и рабочие процессы | Слой агентов (`app/agents/`) | `c07-*` |
+| 8 — Оценка + LLMOps | Слой оценки (`app/evaluation/`) | `c08-*` |
+| 9 — Надежность + Вывод | Слой надежности (`app/reliability/`) | `c09-*` |
+| 10 — Развертывание и масштабирование | Конфигурация масштабирования | `c10-*` |
+| 11 — Финальный проект | Полная производственная система | `c11-*` |
 
-## Repository structure
+## Структура репозитория
 
 ```
 app/
-├── main.py          ← FastAPI entry point (Course 1)
-├── api/             ← API layer — request handling (Course 1)
-├── routing/         ← AI routing layer — model/cost routing (Course 5)
-├── rag/             ← RAG layer — retrieval-augmented generation (Course 2)
-├── ingestion/       ← Ingestion pipeline — document processing (Course 3)
-├── context/         ← Context engine — compression & memory (Course 4)
-├── agents/          ← Agents & workflows — LangGraph (Course 7)
-├── evaluation/      ← Evaluation layer — RAGAS & regression (Course 8)
-├── reliability/     ← Reliability — circuit breaker, retries (Course 9)
-├── cache/           ← Semantic cache — embedding-based hit rate (Course 5)
-├── observability/   ← Metrics, tracing, cost tracking (Course 8)
-├── llm/             ← LLM provider clients — OpenAI, Anthropic (Course 1)
-└── core/            ← Shared utilities, config, base classes (Course 1)
+├── main.py          ← Точка входа FastAPI (Курс 1)
+├── api/             ← Слой API — обработка запросов (Курс 1)
+├── routing/         ← Слой маршрутизации ИИ — маршрутизация модели/стоимости (Курс 5)
+├── rag/             ← Слой RAG — генерация с дополнением из базы знаний (Курс 2)
+├── ingestion/       ← Конвейер ingestion — обработка документов (Курс 3)
+├── context/         ← Движок контекста — сжатие и память (Курс 4)
+├── agents/          ← Агенты и рабочие процессы — LangGraph (Курс 7)
+├── evaluation/      ← Слой оценки — RAGAS и регрессионное тестирование (Курс 8)
+├── reliability/     ← Надежность — защитник цепи, повторные попытки (Курс 9)
+├── cache/           ← Семантический кэш — коэффициент попадания на основе эмбеддингов (Курс 5)
+├── observability/   ← Метрики, трассировка, отслеживание стоимости (Курс 8)
+├── llm/             ← Клиенты провайдеров LLM — OpenAI, Anthropic (Курс 1)
+└── core/            ← Общие утилиты, конфигурация, базовые классы (Курс 1)
 tests/
 requirements.txt
 ```
 
-## Quick start (Course 1)
+## Быстрый старт (Курс 1)
 
 ```bash
 pip install -r requirements.txt
 uvicorn app.main:app --reload
-# Open http://localhost:8000/health
+# Открыть http://localhost:8000/health
 ```
