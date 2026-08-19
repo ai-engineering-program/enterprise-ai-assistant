@@ -47,7 +47,7 @@ class TestDetectFormatFromBytes:
         assert detect_format_from_bytes(header) == DocumentFormat.HTML
 
     def test_html_leading_whitespace(self):
-        header = b"   \n<html><body>текст</body></html>"
+        header = "   \n<html><body>текст</body></html>".encode("utf-8")
         assert detect_format_from_bytes(header) == DocumentFormat.HTML
 
     def test_plain_text_has_no_signature(self):
