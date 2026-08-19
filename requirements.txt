@@ -9,3 +9,5 @@ rank-bm25>=0.2.2
 pdfplumber>=0.11.0
 pymupdf>=1.24.0
 beautifulsoup4>=4.12.0
+opencv-python-headless>=4.9.0
+pytesseract>=0.3.10
