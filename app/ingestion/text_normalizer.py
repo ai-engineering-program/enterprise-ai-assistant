@@ -4,6 +4,8 @@ import html
 import re
 import unicodedata
 
+from app.ingestion.ocr_quality_diagnostics import CYRILLIC_LATIN_HOMOGLYPHS
+
 
 __all__ = ["TextNormalizer"]
 
@@ -23,6 +25,13 @@ class TextNormalizer:
     См. урок 4.1: три формы термина "AI-система" / "AI система" /
     "ai-система" в одном корпусе — три разных объекта для embedding-
     модели и для BM25, пока текст не прошёл через этот конвейер.
+
+    Урок 4.2 добавляет два шага, устраняющих проблемы, которые не ловит
+    ни один из шагов урока 4.1: невидимые Unicode-символы категории
+    "формат" (strip_invisible_characters) и смешение букв кириллицы и
+    латиницы внутри одного токена (resolve_homoglyphs) — тот же класс
+    проблемы, что и в OCRQualityDiagnostics (урок 3.3), но для текста
+    произвольного происхождения, а не только для вывода OCR.
     """
 
     # Все дефисоподобные символы, встречающиеся в реальных корпусах:
@@ -50,6 +59,40 @@ class TextNormalizer:
     ACRONYM_PATTERN = re.compile(r"^[A-ZА-ЯЁ0-9\-]{2,}$")
     HAS_LETTER_PATTERN = re.compile(r"[A-ZА-ЯЁ]")
 
+    # Символы категории Unicode "формат" (Cf) — не имеют визуального
+    # отображения, но физически присутствуют в строке и способны
+    # разбить точное совпадение строк, если оказались внутри слова.
+    # Записаны через \u-escape, а не как буквальные символы в
+    # исходнике: вставить их напрямую в код значило бы повторить ровно
+    # ту же ошибку, которую этот урок разбирает (см. урок 4.2).
+    ZERO_WIDTH_CHARACTERS = (
+        "\u200b"  # ZERO WIDTH SPACE - невидимая точка переноса слова
+        "\u200c"  # ZERO WIDTH NON-JOINER
+        "\u200d"  # ZERO WIDTH JOINER
+        "\u200e"  # LEFT-TO-RIGHT MARK
+        "\u200f"  # RIGHT-TO-LEFT MARK
+        "\u2060"  # WORD JOINER
+        "\ufeff"  # ZERO WIDTH NO-BREAK SPACE / BOM в начале файла
+    )
+
+    # Гомоглифы кириллицы и латиницы в обоих регистрах и обоих
+    # направлениях замены. Источник пар символов — CYRILLIC_LATIN_
+    # HOMOGLYPHS из app/ingestion/ocr_quality_diagnostics.py (урок
+    # 3.3): там те же пары нужны только в одном направлении (кириллица
+    # -> латиница) и только в верхнем регистре — для диагностики
+    # ошибок OCR. Здесь нужны оба направления и оба регистра, потому
+    # что источник проблемы другой (см. урок 4.2, resolve_homoglyphs).
+    CYRILLIC_TO_LATIN_HOMOGLYPHS: dict[str, str] = {
+        **CYRILLIC_LATIN_HOMOGLYPHS,
+        **{k.lower(): v.lower() for k, v in CYRILLIC_LATIN_HOMOGLYPHS.items()},
+    }
+    LATIN_TO_CYRILLIC_HOMOGLYPHS: dict[str, str] = {
+        v: k for k, v in CYRILLIC_TO_LATIN_HOMOGLYPHS.items()
+    }
+
+    CYRILLIC_LETTER_PATTERN = re.compile(r"[а-яА-ЯёЁ]")
+    LATIN_LETTER_PATTERN = re.compile(r"[a-zA-Z]")
+
     def unescape_html_entities(self, text: str) -> str:
         """
         Раскодировать HTML-сущности, дожившие до текста после парсинга
@@ -62,6 +105,29 @@ class TextNormalizer:
         не распознают.
 
         TODO: вернуть html.unescape(text)
+        """
+        ...
+
+    def strip_invisible_characters(self, text: str) -> str:
+        """
+        Удалить символы категории Unicode "формат" (Cf) из
+        ZERO_WIDTH_CHARACTERS — они не имеют визуального отображения, но
+        физически присутствуют в строке: невидимая точка переноса слова,
+        оставленная старой СЭД при экспорте текста с выравниванием по
+        ширине (ZERO WIDTH SPACE), метка порядка байт в начале файла
+        (BOM / ZERO WIDTH NO-BREAK SPACE), маркеры направления письма
+        (LEFT-TO-RIGHT MARK, RIGHT-TO-LEFT MARK) — см. урок 4.2.
+
+        Должен выполняться после unescape_html_entities() (сущность вида
+        &zwnj; сначала должна превратиться в реальный символ, чтобы этот
+        шаг её увидел) и до normalize_unicode_form(): символы категории
+        Cf не входят ни в одну совместимую форму разложения NFKC и не
+        были бы устранены на следующем шаге, если пропустить этот.
+
+        TODO:
+        1. Для каждого ch в self.ZERO_WIDTH_CHARACTERS:
+           text = text.replace(ch, "")
+        2. Вернуть text.
         """
         ...
 
@@ -99,6 +165,51 @@ class TextNormalizer:
         1. Пройти по self.QUOTE_VARIANTS.items() как (variant, canonical).
         2. text = text.replace(variant, canonical)
         3. Вернуть text.
+        """
+        ...
+
+    def resolve_homoglyphs(self, text: str) -> str:
+        """
+        Свести случайно затесавшиеся буквы чужого алфавита внутри
+        токена к алфавиту, который явно доминирует в этом токене —
+        родственная, но обратная по направлению задача диагностике
+        омоглифов при OCR (OCRQualityDiagnostics.find_homoglyph_tokens(),
+        урок 3.3, app/ingestion/ocr_quality_diagnostics.py). Там сигнал
+        только помечает блок для проверки человеком, здесь — активно
+        исправляет текст перед индексированием, потому что источник
+        проблемы другой: не путаница OCR-движка между алфавитами при
+        распознавании, а смешение раскладок клавиатуры, автозамена
+        текстового редактора со словарём другого языка или артефакт
+        миграции между СЭД (см. историю этого урока).
+
+        Использует CYRILLIC_TO_LATIN_HOMOGLYPHS и
+        LATIN_TO_CYRILLIC_HOMOGLYPHS — те же пары букв, что и в
+        CYRILLIC_LATIN_HOMOGLYPHS (урок 3.3), но с учётом обоих
+        регистров и обоих направлений замены.
+
+        TODO:
+        1. tokens = text.split(" ")
+        2. Для каждого token в tokens:
+           a. cyr_count = len(self.CYRILLIC_LETTER_PATTERN.findall(token))
+           b. lat_count = len(self.LATIN_LETTER_PATTERN.findall(token))
+           c. Если cyr_count == 0 или lat_count == 0 — токен одного
+              алфавита, оставить без изменений, перейти к следующему.
+           d. Если cyr_count >= lat_count — кириллица доминирует: для
+              каждой пары (variant, canonical) из
+              self.LATIN_TO_CYRILLIC_HOMOGLYPHS.items() —
+              token = token.replace(variant, canonical).
+           e. Иначе — латиница доминирует: аналогично пройти по
+              self.CYRILLIC_TO_LATIN_HOMOGLYPHS.items().
+        3. Собрать обработанные токены обратно через " ".join(...) и
+           вернуть результат.
+
+        Известное ограничение простой эвристики (разбирается в тексте
+        урока): токен вида "IT-специалист" содержит больше кириллических
+        букв, чем латинских, поэтому после этого шага буква "T" будет
+        заменена на кириллическую "Т", а буква "I" останется латинской
+        (для неё нет пары в LATIN_TO_CYRILLIC_HOMOGLYPHS) — решение по
+        большинству в токене не защищено от разрушения легитимной
+        аббревиатуры, вложенной в смешанный по алфавиту токен.
         """
         ...
 
@@ -151,19 +262,31 @@ class TextNormalizer:
 
     def normalize(self, text: str, fold_case: bool = True) -> str:
         """
-        Полный конвейер нормализации в правильном порядке (урок 4.1).
+        Полный конвейер нормализации в правильном порядке (уроки 4.1 и
+        4.2).
 
         TODO: последовательно применить:
         1. text = self.unescape_html_entities(text)
-        2. text = self.normalize_unicode_form(text)
-        3. text = self.normalize_dashes(text)
-        4. text = self.normalize_quotes(text)
-        5. если fold_case: text = self.fold_case_preserving_acronyms(text)
-        6. text = self.normalize_whitespace(text)
-        7. вернуть text
+        2. text = self.strip_invisible_characters(text)      # урок 4.2
+        3. text = self.normalize_unicode_form(text)
+        4. text = self.normalize_dashes(text)
+        5. text = self.normalize_quotes(text)
+        6. text = self.resolve_homoglyphs(text)               # урок 4.2
+        7. если fold_case: text = self.fold_case_preserving_acronyms(text)
+        8. text = self.normalize_whitespace(text)
+        9. вернуть text
 
         fold_case=False позволяет пропустить свёртку регистра там, где
         дальше по пайплайну текст всё ещё нужен с сохранённым регистром
         (например, для NER-моделей санитизации PII — урок 4.4).
+
+        resolve_homoglyphs() должен идти после normalize_dashes() и
+        normalize_quotes() (порядок между этими тремя шагами друг
+        относительно друга не критичен — они работают с разными
+        символами) и обязательно до fold_case_preserving_acronyms():
+        ACRONYM_PATTERN распознаёт заглавные буквы кириллицы и латиницы
+        одинаково и не отличает токен со смешанным алфавитом от
+        настоящей аббревиатуры — смешение алфавитов нужно устранить
+        раньше, чем эвристика примет решение о регистре токена.
         """
         ...
