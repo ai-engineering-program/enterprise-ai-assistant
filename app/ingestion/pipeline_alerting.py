@@ -4,6 +4,7 @@ import time
 from dataclasses import dataclass, field
 from typing import Callable, Optional
 
+from app.ingestion.data_contract import ContractViolation
 from app.ingestion.data_quality_report import QualityViolation
 
 
@@ -254,6 +255,36 @@ class PipelineAlertMonitor:
            alerts.append(Alert(signal=f"quality:{violation.metric}",
                value=violation.value, threshold=violation.threshold,
                severity=severity, message=violation.message))
+        3. Вернуть alerts.
+        """
+        ...
+
+    # ------------------------------------------------------------------
+    # Обёртка над нарушениями data contract из урока 7.3
+    # ------------------------------------------------------------------
+    def from_contract_violations(self, violations: list[ContractViolation]) -> list[Alert]:
+        """
+        Обернуть ContractViolation (DocumentContractValidator.validate_document()
+        / .validate_batch(), урок 7.3) в Alert. В отличие от
+        from_quality_violations(), severity здесь НЕ вычисляется через
+        self._severity_for() — нарушение data contract не измеряет,
+        насколько сильно значение отклонилось от порога, оно фиксирует
+        бинарный факт "документ не соответствует согласованной схеме
+        источника". Это всегда критично: документ с невалидным полем
+        не может быть тихо обработан со значением по умолчанию (см.
+        текст урока 7.3, инцидент "ГранитПресс") — severity всегда
+        "critical".
+
+        TODO:
+        1. alerts = []
+        2. Для каждого violation в violations:
+           alerts.append(Alert(
+               signal=f"contract:{violation.field}:{violation.violation_type}",
+               value=1.0,
+               threshold=0.0,
+               severity="critical",
+               message=f"[{violation.document_id}] {violation.message}",
+           ))
         3. Вернуть alerts.
         """
         ...
